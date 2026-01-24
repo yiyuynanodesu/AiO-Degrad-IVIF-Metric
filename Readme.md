@@ -83,7 +83,7 @@ class Network(nn.Module):
         return output
 
 net = Network(your_real_model)
-# Create ir, vi input tensor
+### Create ir, vi input tensor
 from thop import profile
 start = torch.cuda.Event(enable_timing=True)
 end = torch.cuda.Event(enable_timing=True)
@@ -95,6 +95,29 @@ total = sum([params.nelement() for params in net.parameters()])
 start.record()
 output = net(vi, ir)
 end.record()
+torch.cuda.synchronize()
+elapsed_time = start.elapsed_time(end)
+flops_g = flops / 1e9  # to GFLOPs
+params_m = total / 1e6  # to MParams
+speed_s = elapsed_time / 1000  # to Second
+print(f'GFLOPs: {flops_g:.2f}, MParams: {params_m:.2f}, Speed: {speed_s:.3f}s')
+
+### if you meet nn.DataParallel you can use this:
+net = Network(your_real_model)
+### Create ir, vi input tensor
+from thop import profile
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+torch.cuda.synchronize()
+#### model fusion ####
+start.record()
+output = net(vi, ir)
+end.record()
+#### model fusion ####
+vi_profile = vi.unsqueeze(0)
+ir_profile = ir.unsqueeze(0)
+flops, _ = profile(net, inputs=(vi_profile, ir_profile))
+total = sum([params.nelement() for params in net.parameters()])
 torch.cuda.synchronize()
 elapsed_time = start.elapsed_time(end)
 flops_g = flops / 1e9  # to GFLOPs
