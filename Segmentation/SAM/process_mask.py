@@ -5,12 +5,14 @@ from PIL import Image
 import os
 import matplotlib.pyplot as plt
 from PIL import ImageColor
-def process_masks(img_path, save_path):
+from tqdm import tqdm
 
-    masks_file_list = os.listdir(img_path)
+def process_masks(mask_dataset_path, save_path):
 
-    for mask_file in masks_file_list:
-        mask_file_path = os.path.join(img_path, mask_file)
+    masks_file_list = os.listdir(mask_dataset_path)
+
+    for mask_file in tqdm(masks_file_list):
+        mask_file_path = os.path.join(mask_dataset_path, mask_file)
         mask_list = os.listdir(mask_file_path)
 
         png_num = len(mask_list)-1
@@ -19,10 +21,8 @@ def process_masks(img_path, save_path):
         
         img = np.array(Image.open(os.path.join(mask_file_path,mask_list[0])))  
         img_list.append(img)
-        image_name = mask_file + ".png"
-        save_path_ = os.path.join(save_path, mask_file)
-        os.makedirs(save_path_, exist_ok=True)
-        save_path_ = os.path.join(save_path_, image_name)
+        image_name = mask_file
+        save_path_ = os.path.join(save_path, image_name)
         new_img = np.zeros_like(img_list[0])
         Image.fromarray(new_img).save(save_path_)
         image_pil = Image.open(save_path_)
@@ -30,7 +30,6 @@ def process_masks(img_path, save_path):
         
         for root,dirs,files in os.walk(mask_file_path):
             for image in files:  
-                print(image)
                 if image.endswith(".png"): 
                     image_path =  os.path.join(mask_file_path, image)
                     img = Image.open(image_path)
@@ -44,8 +43,10 @@ def process_masks(img_path, save_path):
         image_pil.save(save_path_)
         
 
-
-img_path ="./mask/" 
-save_path = './processed_mask/'
-
-process_masks(img_path, save_path)
+dataset = 'MSRS'
+mask_path ="./mask/" 
+mask_dataset_path = os.path.join(mask_path, dataset)
+save_dir = './processed_mask/'
+save_path = os.path.join(save_dir, dataset)
+os.makedirs(save_path, exist_ok=True)
+process_masks(mask_dataset_path, save_path)
