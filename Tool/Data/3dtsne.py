@@ -15,8 +15,8 @@ from sklearn.decomposition import PCA
 
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-from model.Dino_Clip import DINOiser
-from hydra import compose, initialize
+
+from model.Adapter_one import Adapter as one
 
 
 # 设置随机种子
@@ -46,40 +46,7 @@ class CustomDataset(Dataset):
         super().__init__()
         self.vis_path = vis_path
         self.filename_path = os.listdir(vis_path)
-        self.process = transforms.Compose([
-            transforms.Resize((224,224)),
-        ])
-
-    def get_frequency_domain_tensor(self, image):
-        if image is None:
-            raise ValueError("input image should be None")
-        if len(image.shape) != 4 or image.shape[1] != 1:
-            raise ValueError(f"should be [b, 1, h, w], but get {image.shape}")
-    
-        f = torch.fft.fft2(image, dim=(-2, -1))
-        fshift = torch.fft.fftshift(f, dim=(-2, -1))
-        magnitude_spectrum = torch.abs(fshift)
-    
-        # Add a small epsilon to avoid log(0)
-        magnitude_spectrum = torch.log(magnitude_spectrum + 1e-8)
-        return magnitude_spectrum
-    
-    def get_rgb_frequency_domain_tensor(self, image):
-        if image is None:
-            raise ValueError("input image should be None")
-        
-        from torchvision import transforms
-        to_tensor = transforms.ToTensor()
-        
-        (b, g, r) = image.split()
-        b_tensor, g_tensor, r_tensor = to_tensor(b).unsqueeze(0), to_tensor(g).unsqueeze(0), to_tensor(r).unsqueeze(0)
-    
-        mag_image_b = self.get_frequency_domain_tensor(b_tensor)
-        mag_image_g = self.get_frequency_domain_tensor(g_tensor)
-        mag_image_r = self.get_frequency_domain_tensor(r_tensor)
-        
-        mag_image = torch.concat([mag_image_b, mag_image_g, mag_image_r],dim=1)
-        return mag_image.squeeze(0)
+        self.toTensor = transforms.ToTensor()
 
     def __len__(self):
         return len(self.filename_path)
@@ -88,10 +55,9 @@ class CustomDataset(Dataset):
         filename = self.filename_path[idx]
         image_path = os.path.join(self.vis_path, filename)
         img = Image.open(image_path)
-        img = self.process(img)
-        freq = self.get_rgb_frequency_domain_tensor(img)
+        img_tensor = self.toTensor(img)
         label = get_label(filename)
-        return freq, label
+        return img_tensor, label
 
 def plot_tsne3d(features, labels, class_text, save_path=None):
     '''
@@ -108,7 +74,7 @@ def plot_tsne3d(features, labels, class_text, save_path=None):
                 random_state=42,
                 perplexity=min(30, features.shape[0]-1),  # 自适应perplexity
                 max_iter=1000,
-                learning_rate=200)
+                learning_rate='auto')
     
     try:
         tsne_features = tsne.fit_transform(features)  # 将特征使用t-SNE降维至3维
@@ -138,7 +104,7 @@ def plot_tsne3d(features, labels, class_text, save_path=None):
     hex = ["#c957db", "#dd5f57", "#b9db57", "#57db30", "#5784db", "#dc8a78"]  # 粉红，暗红，浅绿，绿，蓝
     
     # 创建显示的figure - 使用更现代的API
-    fig = plt.figure(figsize=(12, 9))
+    fig = plt.figure(figsize=(6, 3))
     ax = fig.add_subplot(111, projection='3d')
     
     # 设置3D视图角度
@@ -175,43 +141,30 @@ def plot_tsne3d(features, labels, class_text, save_path=None):
     plt.savefig(save_path, format="png", dpi=300, bbox_inches='tight')
     plt.close(fig)  # 重要：关闭图形释放内存
     print(f"Saved plot to: {save_path}")
-    
-    # 同时保存一个简化的2D视图用于快速检查
-    fig2d = plt.figure(figsize=(10, 8))
-    plt.scatter(embedded[:, 0], embedded[:, 1], c=labels, cmap='tab10', alpha=0.7)
-    plt.xlabel('t-SNE 1')
-    plt.ylabel('t-SNE 2')
-    plt.title(f't-SNE 2D View')
-    plt.colorbar(label='Class')
-    plt.tight_layout()
-    save_name = "t-sne_2d.png"
-    plt.savefig(save_name, format="png", dpi=200, bbox_inches='tight')
-    plt.close(fig2d)
-    print(f"Saved 2D plot to: {save_name}")
 
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     class_text = ['HazeRain', 'HazeLow', 'Rain', 'Haze', 'Exposure', 'LowLight']
-    vis_path = '../dataset/Light_DDL-12/train/Visible'
+    vis_path = '../dataset/LightDDL/train/Visible'
     save_path = 'tsne_visualization.png'
-    initialize(config_path="configs", version_base=None)            
-    cfg = compose(config_name="clip_dinoiser.yaml")
 
-    model_ex = DINOiser(cfg.model).to(device)
-    model_ex.load_dino()
-    model_ex.to(device)
     
     dataset = CustomDataset(vis_path)
     data_loader = DataLoader(dataset, shuffle=False, batch_size=1)
-
+    
+    model = one()
+    classification_model_path = 'pretrained_weights/one.pth'
+    model.load_state_dict(torch.load(classification_model_path), strict=False)
+    model.to(device)
+    model.eval()
+    
     features = []
     labels = []
     
     with torch.no_grad():
         for data, target in data_loader:
             data, target = data.to(device), target.to(device)
-            feature = model_ex(data)
-            feature = feature.mean(dim=list(range(2, feature.dim())))
+            feature = model(data)
             features.append(feature.cpu().numpy())
             labels.append(target.cpu().numpy())
             
